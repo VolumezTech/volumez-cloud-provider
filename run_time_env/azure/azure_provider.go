@@ -86,9 +86,9 @@ func (provider *AzureServiceProvider) Init() (err error) {
 		AccountID:      data.Compute.SubscriptionId,
 		VmScaleSetName: data.Compute.VmScaleSetName,
 	}
-	instanceID := data.Compute.OSProfile.ComputerName
+	instanceID := data.Compute.VMID
 	if instanceID == "" {
-		instanceID = data.Compute.Name
+		instanceID = data.Compute.VMID
 	}
 	info := &cloudprovider.MachineInfo{
 		InstanceID:   instanceID,
