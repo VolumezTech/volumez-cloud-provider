@@ -21,9 +21,9 @@ type AdditionalInfo struct {
 	VmScaleSetName string
 }
 
-func (info *AdditionalInfo) ToArr() (arr []cloudprovider.AdditionalParam) {
-
-	arr = []cloudprovider.AdditionalParam{
+func (info *AdditionalInfo) ToArr() []cloudprovider.AdditionalParam {
+	return []cloudprovider.AdditionalParam{
+		{"VmID", info.VmID},
 		{"InstanceType", info.InstanceType},
 		{"GroupName", info.GroupName},
 		{"ImageID", info.ImageID},
@@ -31,7 +31,6 @@ func (info *AdditionalInfo) ToArr() (arr []cloudprovider.AdditionalParam) {
 		{"AccountID", info.AccountID},
 		{"VmScaleSetName", info.VmScaleSetName},
 	}
-	return
 }
 
 type AzureServiceProvider struct {
@@ -41,40 +40,33 @@ type AzureServiceProvider struct {
 var _ cloudprovider.ICloudProviderVirtualMachine = (*AzureServiceProvider)(nil)
 
 func NewAzureServiceProvider() cloudprovider.ICloudProviderVirtualMachine {
-	p := &AzureServiceProvider{}
-	return p
+	return &AzureServiceProvider{}
 }
 
 func (provider *AzureServiceProvider) GetName() cloudprovider.CloudProviderType {
 	return cloudprovider.CloudProvider_Azure
 }
 
-func (provider *AzureServiceProvider) Init() (err error) {
-
+func (provider *AzureServiceProvider) Init() error {
 	var jsonData []byte
-	azureMetaData, err := getMetadata(formatURL("attested/document"))
-	_ = azureMetaData
-	if err != nil {
+	if _, err := getMetadata(formatURL("attested/document")); err != nil {
 		// Try local config
 		var readErr error
 		jsonData, readErr = os.ReadFile("azure_instance.json")
 		if readErr != nil {
-			err = errors.New(fmt.Sprintf(`failed to retrieve azure metadata (%v), failed to read local config (%v)`, err, readErr))
-			return
+			return errors.New(fmt.Sprintf(`failed to retrieve azure metadata (%v), failed to read local config (%v)`, err, readErr))
 		}
-	} else {
-		var s string
-		s, err = getMetadata(formatURL("instance"))
-		if err != nil {
-			return
-		}
-		jsonData = []byte(s)
 	}
 
-	var data AzureMetaData
-	err = json.Unmarshal(jsonData, &data)
+	s, err := getMetadata(formatURL("instance"))
 	if err != nil {
-		return
+		return err
+	}
+	jsonData = []byte(s)
+
+	var data AzureMetaData
+	if err = json.Unmarshal(jsonData, &data); err != nil {
+		return err
 	}
 
 	additionalInfo := &AdditionalInfo{
@@ -86,64 +78,63 @@ func (provider *AzureServiceProvider) Init() (err error) {
 		AccountID:      data.Compute.SubscriptionId,
 		VmScaleSetName: data.Compute.VmScaleSetName,
 	}
-	instanceID := data.Compute.VMID
+	instanceID := data.Compute.OSProfile.ComputerName
 	if instanceID == "" {
-		instanceID = data.Compute.VMID
+		instanceID = data.Compute.Name
 	}
-	info := &cloudprovider.MachineInfo{
+	instanceID = fmt.Sprintf(`%v-%v`, additionalInfo.GroupName, instanceID)
+
+	zone := data.Compute.Location
+	if data.Compute.Zone != "" {
+		zone = fmt.Sprintf(`%v-%v`, data.Compute.Location, data.Compute.Zone) //zone seems to be just number in azure creating concatenation of region+zone to get virtual zone
+	}
+	provider.info = &cloudprovider.MachineInfo{
 		InstanceID:   instanceID,
-		Zone:         fmt.Sprintf(`%v-%v`, data.Compute.Location, data.Compute.Zone), //zone seems to be just number in azure creating concatenation of region+zone to get virtual zone
+		Zone:         zone,
 		Region:       data.Compute.Location,
 		Architecture: "",
 		IPAddresses:  data.Network.GetPrivateIPs(),
 		PublicDNS:    data.Network.GetPublicDNS(),
 		Additional:   additionalInfo.ToArr(),
 	}
-	provider.info = info
-	return
+	return nil
 }
 
-func (provider *AzureServiceProvider) GetMachineInfo() (info *cloudprovider.MachineInfo, err error) {
-
+func (provider *AzureServiceProvider) GetMachineInfo() (*cloudprovider.MachineInfo, error) {
 	if provider.info == nil {
-		err = errors.New("Failed to retrieve")
-		return
+		return nil, errors.New("Failed to retrieve")
 	}
-	info = provider.info
-	return
+	return provider.info, nil
 }
 
 func (provider *AzureServiceProvider) GetVirtualMachineID() (instanceId string, err error) {
-
 	return cloudprovider.GetVirtualMachineID(provider)
 }
 
 func formatURL(relativePath string) string {
-	// http://169.254.169.254/metadata/instance/compute?api-version=2021-02-01
-	// http://169.254.169.254/metadata/attested/document?api-version=2020-09-01
 	return fmt.Sprintf(`http://169.254.169.254/metadata/%v?api-version=2021-02-01`, relativePath)
 }
 
-func getMetadata(url string) (result string, err error) {
-
+func getMetadata(url string) (string, error) {
 	request, err := http.NewRequest(http.MethodGet, url, nil)
 	request.Header.Add("Metadata", "True")
 	// request.Header.Add("content-type", "application/json")
 
 	response, err := http.DefaultClient.Do(request)
 	if err != nil {
-		return
+		return "", err
 	}
 	defer response.Body.Close()
 
 	if response.StatusCode != 200 {
-		err = errors.New(fmt.Sprintf(`%v`, response))
-		return
+		return "", errors.New(fmt.Sprintf(`%v`, response))
 	}
 
 	body, err := io.ReadAll(response.Body)
-	result = string(body)
-	return
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
 
 	// ssh := shell.MakeLocalBashExecuter("HOST_NAME")
 	// executor := shell.BindExecOptions(ssh, shell.CmdExecOptions{Timeout: 1 * time.Second, Priority: false})
@@ -152,13 +143,16 @@ func getMetadata(url string) (result string, err error) {
 	// return
 }
 
+// The format of json
+// https://learn.microsoft.com/en-us/azure/virtual-machines/linux/instance-metadata-service?tabs=linux
+// Can be retrieved with
+//
+//	curl -H "Metadata: True" http://169.254.169.254/metadata/instance?api-version=2021-02-01  | json_pp | less
 type AzureMetaData struct {
 	Compute AzureMetaDataCompute `json:"compute"`
 	Network AzureMetaDataNetwork `json:"network"`
 }
 
-// The format of json
-// https://learn.microsoft.com/en-us/azure/virtual-machines/linux/instance-metadata-service?tabs=linux
 type AzureMetaDataCompute struct {
 	VMID              string         `json:"vmId"`
 	Zone              string         `json:"zone"`
@@ -182,11 +176,10 @@ type AzureMetaDataNetwork struct {
 }
 
 func (provider *AzureMetaDataNetwork) GetPublicDNS() string {
-	if len(provider.Interfaces) > 0 {
-		i := provider.Interfaces[0]
-		return i.IPv4.GetPublicDNS()
+	if len(provider.Interfaces) == 0 {
+		return ""
 	}
-	return ""
+	return provider.Interfaces[0].IPv4.GetPublicDNS()
 }
 
 func (provider *AzureMetaDataNetwork) GetPrivateIPs() []string {
@@ -211,10 +204,10 @@ type AzureMetaDataAddressFamily struct {
 }
 
 func (provider *AzureMetaDataAddressFamily) GetPublicDNS() string {
-	if len(provider.Addresses) > 0 {
-		return provider.Addresses[0].PublicIpAddress
+	if len(provider.Addresses) == 0 {
+		return ""
 	}
-	return ""
+	return provider.Addresses[0].PublicIpAddress
 }
 
 type AzureMetaDataAddressPair struct {
