@@ -3,12 +3,12 @@ package amz
 import (
 	"errors"
 	"fmt"
+	"github.com/VolumezTech/volumez-cloud-provider/cloudprovider"
+	"github.com/golang/glog"
 	"gopkg.in/yaml.v2"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/VolumezTech/volumez-cloud-provider/cloudprovider"
 )
 
 type AdditionalInfo struct {
@@ -53,16 +53,19 @@ type AmzServiceProvider struct {
 var _ cloudprovider.ICloudProviderVirtualMachine = (*AmzServiceProvider)(nil)
 
 func NewAmzServiceProvider() cloudprovider.ICloudProviderVirtualMachine {
+	glog.Infoln("creating AMZ provider name")
 	p := &AmzServiceProvider{}
 	return p
 }
 
 func (provider *AmzServiceProvider) GetName() cloudprovider.CloudProviderType {
+	glog.Infoln("got AMZ provider name")
 	return cloudprovider.CloudProvider_Aws
 }
 
 func (provider *AmzServiceProvider) Init() (err error) {
 
+	glog.Infoln("init AMZProvider")
 	provider.client, err = NewClient()
 	return
 }

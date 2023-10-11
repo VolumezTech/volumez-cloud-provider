@@ -7,4 +7,7 @@ require (
 	gopkg.in/yaml.v2 v2.2.8
 )
 
-require github.com/jmespath/go-jmespath v0.4.0 // indirect
+require (
+	github.com/golang/glog v1.1.2 // indirect
+	github.com/jmespath/go-jmespath v0.4.0 // indirect
+)

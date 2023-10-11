@@ -2,6 +2,7 @@ package util
 
 import (
 	"encoding/json"
+	"github.com/golang/glog"
 	"io/ioutil"
 	"log"
 	"net/http"
@@ -42,6 +43,7 @@ func New(tokenExpirationInSeconds int) *EC2MetadataClient {
 		imdSV2URL:                imdSV2URL,
 		tokenExpirationInSeconds: tokenExpirationInSeconds,
 	}
+	glog.Infoln("creating new EC2MetadataClient")
 	return client
 }
 
@@ -50,6 +52,7 @@ func (client *EC2MetadataClient) setIMDSv2Token(numberOfRetries int) (err error)
 	if client.currentToken == nil || client.currentToken.TokenExpiration.Before(time.Now()) {
 		var token *token
 		for i := 0; i < numberOfRetries; i++ {
+			glog.Infoln("get_IMD_sv2_SecurityToken")
 			token, err = client.get_IMD_sv2_SecurityToken(client.tokenExpirationInSeconds)
 			if err == nil {
 				client.currentToken = token
@@ -59,10 +62,14 @@ func (client *EC2MetadataClient) setIMDSv2Token(numberOfRetries int) (err error)
 		return err
 	}
 
+	glog.Infoln("get_IMD_sv2_SecurityToken returning nil")
+
 	return nil
 }
 
 func (client *EC2MetadataClient) GetEC2InstanceIDWithRetry(numberOfRetries int) (resp string, err error) {
+
+	glog.Infoln("innside GetEC2InstanceIDWithRetry")
 
 	if numberOfRetries < 1 {
 		log.Fatal("numberOfRetries must be greater than zero")
@@ -81,10 +88,13 @@ func (client *EC2MetadataClient) GetEC2InstanceIDWithRetry(numberOfRetries int) 
 
 	}
 
+	glog.Infoln("Tried getEC2InstanceID_using_IMD_sv2 didn't work")
+
 	//  If IMDsv2 is not successful, then try IMDsv1
 
 	// First, get the EC2 instance ID using IMDSv2.
 	for n := 0; n < numberOfRetries; n++ {
+		glog.Infoln("trying getEC2InstanceID_using_IMD_sv1 didn't work")
 		resp, err = client.getEC2InstanceID_using_IMD_sv1()
 		if err == nil {
 			return resp, nil
@@ -161,6 +171,8 @@ func (client *EC2MetadataClient) getEC2InstanceID_using_IMD_sv1() (string, error
 	if err != nil {
 		return "", err
 	}
+
+	glog.Infof("iniside getEC2InstanceID_using_IMD_sv1 got: - %v", string(body))
 
 	return string(body), nil
 }
